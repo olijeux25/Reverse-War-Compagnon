@@ -1,0 +1,190 @@
+import ipywidgets as widgets
+from IPython.display import display, clear_output
+import pandas as pd
+
+# --- Définition des unités ---
+unit_definitions = {
+    "Archer": {"force": 2},
+    "Paladin": {"force": 4},
+    "Soldat": {"force": 2},
+    "Mage": {"force": 3},
+    "Dragon": {"force": 10},
+    "Erudit": {"force": 0},
+    "Garde Royale": {"force": 5},
+    "Ranger": {"force": 3},
+    "Nécromancien": {"force": 6},
+    "Porte Étendard": {"force": 0},
+    "Cartographe": {"force": 6},
+    "Guérisseur": {"force": 3},
+    "Golem": {"force": 5},
+    "Ménestrel": {"force": 0},
+    "Assassin": {"force": 4},
+    "": {"force": 0}
+}
+unit_list = list(unit_definitions.keys())
+
+# --- Création de la grille ---
+def create_grid():
+    return [[(widgets.Dropdown(options=unit_list, layout=widgets.Layout(width='150px')),
+              widgets.BoundedIntText(value=(i * 3 + j + 1), min=1, max=9, layout=widgets.Layout(width='50px')))
+             for j in range(3)] for i in range(3)]
+
+def render_grid(grid_widgets):
+    grid_layout = []
+    for row in grid_widgets:
+        row_widgets = [widgets.VBox([unit, pos]) for unit, pos in row]
+        grid_layout.append(widgets.HBox(row_widgets))
+    return widgets.VBox(grid_layout)
+
+# --- Calcul du score ---
+def calculer_score(grille, bonus_suite=0, bonus_etendard=0, bonus_necro=0, is_joueur=True):
+    flat = [(unit.value, pos.value) for row in grille for unit, pos in row]
+    total_force = 0
+    bonus_units = 0
+    detail = []
+
+    noms_uniques = list(set(u for u, _ in flat if u != ""))
+    compteur = {u: sum(1 for x, _ in flat if x == u) for u in noms_uniques}
+
+    for unit, _ in flat:
+        force = unit_definitions[unit]["force"]
+        total_force += force
+        detail.append((unit, "Force de base", force))
+
+    for idx, (unit, _) in enumerate(flat):
+        score = 0
+
+        if unit == "Soldat":
+            score = 3 if is_joueur else 4 * (compteur["Soldat"] - 1) if compteur["Soldat"] > 1 else 0
+
+        elif unit == "Mage":
+            score = 2 * (compteur["Mage"] - 1) if compteur["Mage"] > 1 else 0
+
+        elif unit == "Archer":
+            score = 4 * (compteur["Archer"] - 1) if compteur["Archer"] > 1 else 0
+
+        elif unit == "Paladin":
+            score = 3 * (compteur["Paladin"] - 1) if compteur["Paladin"] > 1 else 0
+
+        elif unit == "Erudit":
+            score = 2 * (
+                compteur.get("Mage", 0) + compteur.get("Guérisseur", 0) + compteur.get("Nécromancien", 0)
+            )
+
+        elif unit == "Ranger":
+            score = 2 * (compteur.get("Mage", 0) + compteur.get("Archer", 0))
+
+        elif unit == "Garde Royale":
+            nb_soldats = compteur.get("Soldat", 0)
+            nb_paladins = compteur.get("Paladin", 0)
+            score = 2 * nb_soldats if nb_soldats >= nb_paladins else 2 * nb_paladins
+
+        elif unit == "Guérisseur":
+            for x in [-1, 1, -3, 3]:
+                adj = idx + x
+                if 0 <= adj < 9:
+                    adj_unit = flat[adj][0]
+                    if unit_definitions[adj_unit]["force"] <= 3:
+                        score += 3 if is_joueur else 4
+
+        elif unit == "Dragon":
+            malus_types = ["Mage", "Soldat", "Archer", "Paladin"]
+            for x in [-1, 1, -3, 3]:
+                adj = idx + x
+                if 0 <= adj < 9:
+                    adj_unit = flat[adj][0]
+                    if adj_unit in malus_types:
+                        score -= 5
+
+        elif unit == "Ménestrel":
+            if is_joueur:
+                uniques = set(u for u, _ in flat if u != "")
+                score = len(uniques)
+            else:
+                row_idx = idx // 3
+                col_idx = idx % 3
+                ligne = set(flat[row_idx * 3 + k][0] for k in range(3) if flat[row_idx * 3 + k][0])
+                colonne = set(flat[col_idx + 3 * k][0] for k in range(3) if flat[col_idx + 3 * k][0])
+                score = 2 * len(ligne.union(colonne))
+
+        if score:
+            bonus_units += score
+            detail.append((unit, "Bonus unité", score))
+
+    # Bonus supplémentaires saisis manuellement
+    if bonus_suite:
+        detail.append(("Suite", "Bonus manuel", bonus_suite))
+        bonus_units += bonus_suite
+
+    if bonus_etendard:
+        detail.append(("Porte-Étendard", "Bonus manuel", bonus_etendard))
+        bonus_units += bonus_etendard
+
+    if bonus_necro:
+        detail.append(("Bonus additionnel", "Bonus manuel", bonus_necro))
+        bonus_units += bonus_necro
+
+    total = total_force + bonus_units
+    return total_force, bonus_units, total, detail
+
+# --- Widgets d'entrée ---
+joueur_grid = create_grid()
+ia_grid = create_grid()
+
+bonus_joueur = widgets.BoundedIntText(description="Bonus suite (J)", min=0, value=0)
+etendard_joueur = widgets.BoundedIntText(description="Porte-Étendard (J)", min=0, value=0)
+necro_joueur = widgets.BoundedIntText(description="Nécromancien (J)", min=0, value=0)
+
+bonus_ia = widgets.BoundedIntText(description="Bonus suite (IA)", min=0, value=0)
+etendard_ia = widgets.BoundedIntText(description="Porte-Étendard (IA)", min=0, value=0)
+necro_ia = widgets.BoundedIntText(description="Nécromancien (IA)", min=0, value=0)
+cartographe_ia = widgets.BoundedIntText(description="Cartographe (IA)", min=0, value=0)
+
+# --- Calcul et affichage ---
+calculate_button = widgets.Button(description="Calculer Scores", button_style='success')
+output = widgets.Output()
+
+def on_calculate(_):
+    with output:
+        clear_output()
+        f1, b1, t1, d1 = calculer_score(joueur_grid, bonus_joueur.value, etendard_joueur.value, necro_joueur.value, is_joueur=True)
+        f2, b2, t2, d2 = calculer_score(
+            ia_grid,
+            bonus_ia.value,
+            etendard_ia.value,
+            necro_ia.value + cartographe_ia.value,
+            is_joueur=False
+        )
+
+        print("🎯 Score Joueur")
+        print(f"  Force de base : {f1}")
+        print(f"  Bonus : {b1}")
+        print(f"  Total : {t1}\n")
+        display(pd.DataFrame(d1, columns=["Unité", "Type", "Points"]))
+
+        print("\n🤖 Score IA")
+        print(f"  Force de base : {f2}")
+        print(f"  Bonus : {b2}")
+        print(f"  Total : {t2}\n")
+        display(pd.DataFrame(d2, columns=["Unité", "Type", "Points"]))
+
+calculate_button.on_click(on_calculate)
+
+# --- Interface finale ---
+ui = widgets.VBox([
+    widgets.HTML("<h3>Grille Joueur</h3>"),
+    render_grid(joueur_grid),
+    bonus_joueur,
+    etendard_joueur,
+    necro_joueur,
+    widgets.HTML("<h3>Grille IA</h3>"),
+    render_grid(ia_grid),
+    bonus_ia,
+    etendard_ia,
+    necro_ia,
+    cartographe_ia,
+    calculate_button,
+    output
+])
+
+display(ui)
